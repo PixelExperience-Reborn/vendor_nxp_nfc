@@ -1,0 +1,70 @@
+name: AOSP17 mondrian NXP NFC source boundary
+
+on:
+  push:
+    branches:
+      - audit/a17-mondrian-nxp-nfc-20261107
+    paths:
+      - 'audit/check_nfc_boundary.py'
+      - 'docs/ANDROID_17_MONDRIAN_NXP_NFC_BOUNDARY_AUDIT.md'
+      - '.github/workflows/a17-nxp-nfc-boundary.yml'
+  pull_request:
+    paths:
+      - 'audit/check_nfc_boundary.py'
+      - 'docs/ANDROID_17_MONDRIAN_NXP_NFC_BOUNDARY_AUDIT.md'
+      - '.github/workflows/a17-nxp-nfc-boundary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-nxp-nfc-source-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout source-only audit branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Fetch original PE NFC SHA for independent inspection
+        run: |
+          git fetch -q --no-tags --depth=1 origin \
+            +refs/heads/seventeen:refs/remotes/origin/seventeen
+      - name: Fetch pinned Android17 NXP NFC upstream release
+        run: |
+          mkdir -p "$RUNNER_TEMP/aosp17-nxp"
+          git -C "$RUNNER_TEMP/aosp17-nxp" init -q
+          git -C "$RUNNER_TEMP/aosp17-nxp" remote add origin \
+            https://android.googlesource.com/platform/hardware/nxp/nfc
+          git -C "$RUNNER_TEMP/aosp17-nxp" fetch -q --no-tags \
+            --filter=blob:none --depth=1 origin refs/tags/android-17.0.0_r1
+      - name: Fetch pinned known-good sm8450-common hardware reference
+        run: |
+          git clone -q --filter=blob:none --depth=1 \
+            --branch lineage-24.0 \
+            https://github.com/LF52406/mondrian_android_device_xiaomi_sm8450-common.git \
+            "$RUNNER_TEMP/sm8450-common"
+      - name: Fetch reviewed AOSP17 PE-Reborn manifest
+        run: |
+          git clone -q --depth=1 \
+            --branch port/a17-aosp17-manifest-20261102 \
+            https://github.com/PixelExperience-Reborn/manifest.git \
+            "$RUNNER_TEMP/manifest"
+      - name: Verify old HIDL vs official AIDL vs real device source boundary
+        run: |
+          python3 audit/check_nfc_boundary.py \
+            "$GITHUB_WORKSPACE" \
+            "$RUNNER_TEMP/aosp17-nxp" \
+            "$RUNNER_TEMP/sm8450-common" \
+            "$RUNNER_TEMP/manifest"
+      - name: Run manifest positive/negative regression tests
+        run: |
+          cd "$RUNNER_TEMP/manifest"
+          python3 -m unittest discover -s tools \
+            -p test_aosp17_manifest_entrypoint.py -v
+      - name: Clarify validation scope
+        run: |
+          echo "SOURCE-ONLY: pinned tree/Soong/VINTF/product and AOSP17 manifest checks."
+          echo "NOT RUN: NXP Soong compilation, checkvintf, CTS/VTS, full device build,"
+          echo "secure element, NFC pay/HCE, SELinux enforcing or mondrian hardware tests."
